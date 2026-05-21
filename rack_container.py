@@ -8,9 +8,9 @@ import numpy as np
 
 from bottle_rack import DEFAULT_DX, DEFAULT_DY, BottleRack
 
-DEFAULT_MX = 0.065  # m, rack (0,0) hole (0,0) in container frame
-DEFAULT_MY = 0.045
-DEFAULT_TX = 0.085  # m, rack spacing along container +x
+DEFAULT_MX = -0.022  # m, rack (0,0) hole (0,0) in container frame
+DEFAULT_MY = -0.045
+DEFAULT_TX = 0.086  # m, rack spacing along container +x
 DEFAULT_TY = 0.128  # m, rack spacing along container +y
 
 

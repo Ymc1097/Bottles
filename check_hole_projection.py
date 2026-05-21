@@ -13,12 +13,22 @@ import argparse
 import cv2
 import numpy as np
 
+from bottle_rack import BottleRack
 from data_acquisition import RealSenseCamera
 from marker_board_pose import estimate_board_poses_in_camera, rvec_tvec_to_Rt
 from rack_container import RackContainer
 
-HOLE_RADIUS_M = 0.016
+HOLE_RADIUS_M = 0.0155
 N_CIRCLE_PTS = 32
+
+
+def hole_draw_mask(container: RackContainer) -> np.ndarray:
+    """True for holes to draw; excludes rack (0, 0) (marker board area)."""
+    n = container.n_holes_total
+    idx = np.arange(n)
+    rack_idx = idx // BottleRack.N_HOLES
+    r_row, r_col = np.divmod(rack_idx, RackContainer.N_RACK_COLS)
+    return ~((r_row == 0) & (r_col == 0))
 
 
 def project_hole_circles(
@@ -100,23 +110,6 @@ def draw_holes(
     return vis
 
 
-def pick_container_pose(
-    poses: list,
-    location_index: int | None,
-) -> tuple[np.ndarray, np.ndarray, int] | None:
-    if not poses:
-        return None
-    if location_index is not None:
-        for p in poses:
-            if p.location_index == location_index:
-                R, t = rvec_tvec_to_Rt(p.rvec, p.tvec)
-                return R, t, p.location_index
-        return None
-    p = poses[0]
-    R, t = rvec_tvec_to_Rt(p.rvec, p.tvec)
-    return R, t, p.location_index
-
-
 def run(args: argparse.Namespace) -> None:
     cam = RealSenseCamera(
         width=args.width,
@@ -127,11 +120,13 @@ def run(args: argparse.Namespace) -> None:
     )
     D = np.zeros(8, dtype=np.float64)
     container = RackContainer()
+    draw_mask = hole_draw_mask(container)
+    n_draw = int(draw_mask.sum())
     win = "Hole projection check"
 
     print(
-        f"Holes: {container.n_holes_total} | radius {HOLE_RADIUS_M} m | "
-        f"container loc={args.container_loc} | Q/ESC quit"
+        f"Holes: {n_draw}/{container.n_holes_total} drawn (skip rack 0,0) | "
+        f"radius {HOLE_RADIUS_M} m | Q/ESC quit"
     )
 
     try:
@@ -144,19 +139,15 @@ def run(args: argparse.Namespace) -> None:
             vis = color.copy()
             status = "no marker"
 
-            loc = None if args.container_loc < 0 else args.container_loc
-            picked = pick_container_pose(board_poses, loc)
-            if picked is None and board_poses:
-                status = f"loc {args.container_loc} not visible ({len(board_poses)} other)"
-            elif picked is not None:
-                R, t, loc = picked
-                centers_cam = container.all_hole_positions_in_camera(R, t)
+            if board_poses:
+                R, t = rvec_tvec_to_Rt(board_poses[0].rvec, board_poses[0].tvec)
+                centers_cam = container.all_hole_positions_in_camera(R, t)[draw_mask]
                 centers_uv, radii_px, rim_uv = project_hole_circles(
                     centers_cam, cam.K, D, HOLE_RADIUS_M
                 )
                 vis = draw_holes(vis, centers_uv, radii_px, rim_uv)
                 n_vis = int(np.sum(np.isfinite(centers_uv[:, 0])))
-                status = f"loc={loc} holes drawn={n_vis}/{container.n_holes_total}"
+                status = f"holes drawn={n_vis}/{n_draw}"
 
             cv2.putText(
                 vis,
@@ -195,12 +186,6 @@ def main() -> None:
     p.add_argument("--fps", type=int, default=30)
     p.add_argument("--serial", type=str, default=None)
     p.add_argument("--outdir", type=str, default="./out")
-    p.add_argument(
-        "--container-loc",
-        type=int,
-        default=0,
-        help="marker board location_index for container; use -1 for first visible",
-    )
     run(p.parse_args())
 
 
